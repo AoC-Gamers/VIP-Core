@@ -1,94 +1,108 @@
-name: Build
+name: VIP Core Build
 
-on: [push, pull_request, workflow_dispatch]
+on:
+  push:
+    branches:
+      - master
+      - main
+      - develop
+    tags:
+      - "channel/*"
+  pull_request:
+    branches:
+      - master
+      - main
+      - develop
+  workflow_dispatch:
+
+concurrency:
+  group: vip-core-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
 
 jobs:
-  compile:
+  build:
     runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.sm-version == '1.12.x' }}
-    strategy:
-      matrix:
-        sm-version: [ '1.11.x', '1.12.x' ]
 
-    name: "Build SM ${{ matrix.sm-version }}"
     steps:
-      - name: Prepare env
-        shell: bash
-        run: |
-          echo "GITHUB_SHA_SHORT=${GITHUB_SHA::7}" >> $GITHUB_ENV
-          SMVERSION_FULL=${{ matrix.sm-version }}
-          echo "SMVERSION_SHORT=${SMVERSION_FULL:0:-2}" >> $GITHUB_ENV
+      - name: Check out repository
+        uses: actions/checkout@v5
 
-      - uses: actions/checkout@v2
-
-      - name: Setup SP
+      - name: Setup SourcePawn compiler
         uses: rumblefrog/setup-sp@master
         with:
-          version: ${{ matrix.sm-version }}
+          version: "1.12.x"
 
-      - name: Run compiler
-        run: |
-          cd addons/sourcemod
-          mkdir plugins
-          cd scripting
-          spcomp VIP_Core.sp -E -o ../plugins/VIP_Core.smx -i./include
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: VIP-Core-${{ env.SMVERSION_SHORT }}-${{ env.GITHUB_SHA_SHORT }}
-          path: |
-            addons
-            LICENSE
-          retention-days: 2
-
-  release:
-    name: Release
-    if: github.ref_type == 'tag'
-    needs: compile
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v2
-
-      - name: Find Assets
+      - name: Build VIP Core
         shell: bash
         run: |
-          echo "artifact_1_11=$(find * -maxdepth 0 -type d -name '*1.11*')" >> $GITHUB_ENV
-          echo "artifact_1_12=$(find * -maxdepth 0 -type d -name '*1.12*')" >> $GITHUB_ENV
-          
-      - name: Archive Assets
-        run: |
-          zip -r ${{ env.artifact_1_11 }}.zip ${{ env.artifact_1_11 }}
-          zip -r ${{ env.artifact_1_12 }}.zip ${{ env.artifact_1_12 }}
+          mkdir -p addons/sourcemod/plugins
+          cd addons/sourcemod/scripting
+          spcomp VIP_Core.sp -E -o ../plugins/VIP_Core.smx -i./include
 
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1.0.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve package metadata
+        id: meta
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#channel/}"
+          elif [[ "${GITHUB_REF_NAME}" == "develop" ]]; then
+            version="develop"
+          elif [[ "${GITHUB_REF_NAME}" == "master" || "${GITHUB_REF_NAME}" == "main" ]]; then
+            version="latest"
+          else
+            version="pr-${GITHUB_SHA::7}"
+          fi
+
+          basename="vip-core-sourcemod-${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "basename=${basename}" >> "$GITHUB_OUTPUT"
+
+      - name: Package zip
+        shell: bash
+        run: |
+          mkdir -p dist
+          python3 - <<'PY'
+          import os
+          import zipfile
+
+          out_file = os.path.join("dist", "${{ steps.meta.outputs.basename }}.zip")
+          entries = ["addons", "LICENSE", "README.md"]
+
+          with zipfile.ZipFile(out_file, "w", zipfile.ZIP_DEFLATED) as zf:
+              for entry in entries:
+                  if not os.path.exists(entry):
+                      continue
+                  if os.path.isdir(entry):
+                      for root, dirs, files in os.walk(entry):
+                          dirs.sort()
+                          files.sort()
+                          rel_root = os.path.relpath(root, ".")
+                          if not dirs and not files:
+                              zf.writestr(rel_root.rstrip("/") + "/", "")
+                          for name in files:
+                              path = os.path.join(root, name)
+                              arcname = os.path.relpath(path, ".")
+                              zf.write(path, arcname)
+                  else:
+                      zf.write(entry, entry)
+          PY
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.basename }}
+          path: dist/${{ steps.meta.outputs.basename }}.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish release asset
+        if: startsWith(github.ref, 'refs/tags/channel/')
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          release_name: ${{ github.ref_name }}
-          draft: true
+          files: dist/${{ steps.meta.outputs.basename }}.zip
+          draft: false
           prerelease: false
-
-      - name: Upload Asset 1.11
-        uses: actions/upload-release-asset@v1.0.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ env.artifact_1_11 }}.zip
-          asset_name: ${{ env.artifact_1_11 }}.zip
-          asset_content_type: application/zip
-
-      - name: Upload Asset 1.12
-        uses: actions/upload-release-asset@v1.0.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ env.artifact_1_12 }}.zip
-          asset_name: ${{ env.artifact_1_12 }}.zip
-          asset_content_type: application/zip
