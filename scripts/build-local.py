@@ -114,7 +114,7 @@ def main() -> int:
     output_file = plugins_root / "VIP_Core.smx"
     run_spcomp(spcomp, source_file, include_dirs, output_file, compile_log)
 
-    shutil.copytree(root / "addons", output_root / "addons")
+    shutil.copytree(root / "addons", output_root / "addons", dirs_exist_ok=True)
 
     if workspace is not None and workspace.exists():
         remove_tree_if_exists(workspace)
