@@ -50,17 +50,22 @@ jobs:
         run: |
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             version="${GITHUB_REF_NAME#channel/}"
+            release_tag="${GITHUB_REF_NAME}"
           elif [[ "${GITHUB_REF_NAME}" == "develop" ]]; then
             version="develop"
+            release_tag="channel/develop"
           elif [[ "${GITHUB_REF_NAME}" == "master" || "${GITHUB_REF_NAME}" == "main" ]]; then
             version="latest"
+            release_tag="channel/latest"
           else
             version="pr-${GITHUB_SHA::7}"
+            release_tag=""
           fi
 
           basename="vip-core-${version}"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "basename=${basename}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
 
       - name: Package zip
         env:
@@ -77,10 +82,10 @@ jobs:
           retention-days: 14
 
       - name: Publish release asset
-        if: startsWith(github.ref, 'refs/tags/channel/')
+        if: steps.meta.outputs.release_tag != ''
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ steps.meta.outputs.release_tag }}
           files: dist/release/${{ steps.meta.outputs.basename }}.zip
           draft: false
           prerelease: false
