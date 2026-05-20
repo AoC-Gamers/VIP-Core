@@ -58,7 +58,7 @@ jobs:
             version="pr-${GITHUB_SHA::7}"
           fi
 
-          basename="vip-core-sourcemod-${version}"
+          basename="vip-core-${version}"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "basename=${basename}" >> "$GITHUB_OUTPUT"
 
