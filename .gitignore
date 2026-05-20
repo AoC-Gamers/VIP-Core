@@ -1,2 +1,10 @@
 .vscode/
 *.smx
+deps/
+build-windows/
+build-linux/
+dist/
+*.zip
+*.tar
+*.tar.gz
+*.log

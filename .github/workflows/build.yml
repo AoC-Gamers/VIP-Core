@@ -22,6 +22,9 @@ concurrency:
 permissions:
   contents: write
 
+env:
+  SOURCEMOD_VERSION: "1.12"
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -30,17 +33,16 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Setup SourcePawn compiler
-        uses: rumblefrog/setup-sp@master
-        with:
-          version: "1.12.x"
-
-      - name: Build VIP Core
-        shell: bash
+      - name: Install build dependencies
         run: |
-          mkdir -p addons/sourcemod/plugins
-          cd addons/sourcemod/scripting
-          spcomp VIP_Core.sp -E -o ../plugins/VIP_Core.smx -i./include
+          sudo apt-get update
+          sudo apt-get install --yes curl tar python3 make
+
+      - name: Build SourceMod artifact
+        run: bash ./scripts/ci-build-sourcemod.sh
+
+      - name: Validate SourceMod artifact
+        run: bash ./scripts/ci-validate-artifact.sh
 
       - name: Resolve package metadata
         id: meta
@@ -61,40 +63,16 @@ jobs:
           echo "basename=${basename}" >> "$GITHUB_OUTPUT"
 
       - name: Package zip
-        shell: bash
-        run: |
-          mkdir -p dist
-          python3 - <<'PY'
-          import os
-          import zipfile
-
-          out_file = os.path.join("dist", "${{ steps.meta.outputs.basename }}.zip")
-          entries = ["addons", "LICENSE", "README.md"]
-
-          with zipfile.ZipFile(out_file, "w", zipfile.ZIP_DEFLATED) as zf:
-              for entry in entries:
-                  if not os.path.exists(entry):
-                      continue
-                  if os.path.isdir(entry):
-                      for root, dirs, files in os.walk(entry):
-                          dirs.sort()
-                          files.sort()
-                          rel_root = os.path.relpath(root, ".")
-                          if not dirs and not files:
-                              zf.writestr(rel_root.rstrip("/") + "/", "")
-                          for name in files:
-                              path = os.path.join(root, name)
-                              arcname = os.path.relpath(path, ".")
-                              zf.write(path, arcname)
-                  else:
-                      zf.write(entry, entry)
-          PY
+        env:
+          RELEASE_BASENAME: ${{ steps.meta.outputs.basename }}
+          RELEASE_VERSION: ${{ steps.meta.outputs.version }}
+        run: bash ./scripts/ci-package-release-assets.sh
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.meta.outputs.basename }}
-          path: dist/${{ steps.meta.outputs.basename }}.zip
+          path: dist/release/${{ steps.meta.outputs.basename }}.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -103,6 +81,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          files: dist/${{ steps.meta.outputs.basename }}.zip
+          files: dist/release/${{ steps.meta.outputs.basename }}.zip
           draft: false
           prerelease: false
