@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -54,6 +55,79 @@ def remove_tree_if_exists(target: Path) -> None:
         raise last_error
 
 
+def get_build_plugin_buckets(manifest: dict) -> dict:
+    return manifest.get("build", {}).get("plugins", {})
+
+
+def classify_plugin(plugin_stem: str, build_buckets: dict) -> str | None:
+    for bucket, plugins in build_buckets.items():
+        if plugin_stem in plugins:
+            return bucket
+    return None
+
+
+def detect_default_workspace(root: Path) -> Path | None:
+    if root.as_posix().startswith("/mnt/"):
+        return Path("/tmp/vip-core-build")
+    return None
+
+
+def copy_selected_files(source_root: Path, target_root: Path, files: list[str]) -> None:
+    if not files:
+        return
+    target_root.mkdir(parents=True, exist_ok=True)
+    for relative_file in files:
+        source_file = source_root / relative_file
+        target_file = target_root / relative_file
+        if not source_file.exists():
+            raise FileNotFoundError(f"Required artifact file not found: {source_file}")
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_file, target_file)
+
+
+def copy_selected_directories(source_root: Path, target_root: Path, directories: list[str]) -> None:
+    if not directories:
+        return
+    target_root.mkdir(parents=True, exist_ok=True)
+    for relative_dir in directories:
+        source_dir = source_root / relative_dir
+        target_dir = target_root / relative_dir
+        if not source_dir.exists():
+            raise FileNotFoundError(f"Required artifact directory not found: {source_dir}")
+        shutil.copytree(source_dir, target_dir, dirs_exist_ok=True)
+
+
+def copy_all_children(source_root: Path, target_root: Path) -> None:
+    if not source_root.exists():
+        raise FileNotFoundError(f"Required artifact source not found: {source_root}")
+    target_root.mkdir(parents=True, exist_ok=True)
+    for entry in source_root.iterdir():
+        destination = target_root / entry.name
+        if entry.is_dir():
+            shutil.copytree(entry, destination, dirs_exist_ok=True)
+        else:
+            shutil.copy2(entry, destination)
+
+
+def copy_manifest_tree(manifest: dict, source_root: Path, target_root: Path) -> None:
+    if manifest.get("all", False):
+        copy_all_children(source_root, target_root)
+
+    files = manifest.get("files", [])
+    if files:
+        copy_selected_files(source_root, target_root, files)
+
+    directories = manifest.get("dirs", [])
+    if directories:
+        copy_selected_directories(source_root, target_root, directories)
+
+    for key, value in manifest.items():
+        if key in {"all", "files", "dirs"}:
+            continue
+        if isinstance(value, dict):
+            copy_manifest_tree(value, source_root / key, target_root / key)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Compile VIP-Core into a local build directory.")
     parser.add_argument("--root", default=".", help="Repository root")
@@ -67,7 +141,7 @@ def main() -> int:
     spcomp = Path(args.spcomp).resolve()
     output_root = (root / args.output_root).resolve()
     compile_log = (root / args.compile_log).resolve()
-    workspace = Path(args.workspace).resolve() if args.workspace else None
+    workspace = Path(args.workspace).resolve() if args.workspace else detect_default_workspace(root)
 
     if not spcomp.exists():
         raise FileNotFoundError(f"spcomp not found: {spcomp}")
@@ -75,6 +149,16 @@ def main() -> int:
     source_mod_include_dir = spcomp.parent / "include"
     if not source_mod_include_dir.exists():
         raise FileNotFoundError(f"SourceMod include dir not found: {source_mod_include_dir}")
+
+    package_map_path = root / "plugin-package-map.json"
+    if not package_map_path.exists():
+        raise FileNotFoundError(f"plugin-package-map.json not found: {package_map_path}")
+
+    with package_map_path.open("r", encoding="utf-8") as fh:
+        manifest = json.load(fh)
+
+    build_buckets = get_build_plugin_buckets(manifest)
+    artifact_manifest = manifest.get("artifact", {}).get("addons", {}).get("sourcemod", {})
 
     source_root = root / "addons" / "sourcemod"
     scripting_dir = source_root / "scripting"
@@ -102,19 +186,31 @@ def main() -> int:
 
     remove_tree_if_exists(output_root)
     plugins_root.mkdir(parents=True, exist_ok=True)
+    for bucket in build_buckets:
+        if bucket != "root":
+            (plugins_root / bucket).mkdir(parents=True, exist_ok=True)
 
     compile_log.parent.mkdir(parents=True, exist_ok=True)
     compile_log.write_text("", encoding="utf-8")
 
-    source_file = scripting_dir / "VIP_Core.sp"
-    if not source_file.exists():
-        raise RuntimeError(f"Plugin source not found: {source_file}")
-
     include_dirs = [include_dir, scripting_dir, source_mod_include_dir]
-    output_file = plugins_root / "VIP_Core.smx"
-    run_spcomp(spcomp, source_file, include_dirs, output_file, compile_log)
+    plugin_sources = sorted(scripting_dir.glob("*.sp"))
+    if not plugin_sources:
+        raise RuntimeError(f"No plugin sources found in {scripting_dir}")
 
-    shutil.copytree(root / "addons", output_root / "addons", dirs_exist_ok=True)
+    for source_file in plugin_sources:
+        plugin_stem = source_file.stem
+        bucket = classify_plugin(plugin_stem, build_buckets)
+        if bucket is None:
+            print(f"Skipping {source_file.name}: no plugin bucket mapping", flush=True)
+            continue
+        if bucket == "root":
+            output_file = plugins_root / f"{plugin_stem}.smx"
+        else:
+            output_file = plugins_root / bucket / f"{plugin_stem}.smx"
+        run_spcomp(spcomp, source_file, include_dirs, output_file, compile_log)
+
+    copy_manifest_tree(artifact_manifest, source_root, artifact_root)
 
     if workspace is not None and workspace.exists():
         remove_tree_if_exists(workspace)

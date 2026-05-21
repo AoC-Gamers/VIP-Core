@@ -16,13 +16,13 @@ def copy_if_exists(source: Path, destination: Path) -> None:
 
 
 def main() -> int:
-    if len(sys.argv) != 4:
-        raise SystemExit("Usage: stage-artifact.py <root_dir> <build_dir> <compile_log>")
+    if len(sys.argv) not in (4, 5):
+        raise SystemExit("Usage: stage-artifact.py <root_dir> <build_dir> <compile_log> [output_dir]")
 
     root_dir = Path(sys.argv[1]).resolve()
     build_dir = Path(sys.argv[2]).resolve()
     compile_log = Path(sys.argv[3]).resolve()
-    artifact_dir = root_dir / "dist" / "sourcemod" / "artifact"
+    artifact_dir = Path(sys.argv[4]).resolve() if len(sys.argv) == 5 else root_dir / "dist" / "sourcemod" / "artifact"
 
     if artifact_dir.exists():
         shutil.rmtree(artifact_dir)
@@ -31,6 +31,8 @@ def main() -> int:
     copy_if_exists(build_dir / "addons", artifact_dir / "addons")
     copy_if_exists(root_dir / "README.md", artifact_dir / "README.md")
     copy_if_exists(root_dir / "LICENSE", artifact_dir / "LICENSE")
+    copy_if_exists(root_dir / "plugin-package-map.json", artifact_dir / "plugin-package-map.json")
+    copy_if_exists(root_dir / "docs", artifact_dir / "docs")
     copy_if_exists(compile_log, artifact_dir / "compile.log")
 
     print(f"SourceMod artifacts generated in {artifact_dir}")

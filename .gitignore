@@ -1,10 +1,11 @@
 .vscode/
 *.smx
 deps/
-build-windows/
-build-linux/
+.build/
 dist/
 *.zip
 *.tar
 *.tar.gz
 *.log
+__pycache__/
+*.pyc

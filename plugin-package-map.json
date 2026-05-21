@@ -1,0 +1,36 @@
+{
+  "build": {
+    "plugins": {
+      "root": [
+        "VIP_Core"
+      ]
+    }
+  },
+  "artifact": {
+    "addons": {
+      "sourcemod": {
+        "scripting": {
+          "files": [
+            "VIP_Core.sp"
+          ],
+          "dirs": [
+            "vip"
+          ],
+          "include": {
+            "files": [
+              "vip_core.inc"
+            ]
+          }
+        },
+        "translations": {
+          "files": [
+            "vip_core.phrases.txt"
+          ]
+        },
+        "data": {
+          "all": true
+        }
+      }
+    }
+  }
+}

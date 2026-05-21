@@ -24,3 +24,14 @@ The plugin is very flexible and easy to configure, it can work with both SQLite 
 [EN: [VIP] Core official theme on HlMod.ru](http://hlmod.ru/resources/vip-core.245/)
 
 [EN: Documentation](https://r1ko.github.io/VIP-Core/)
+
+## Build local
+
+```bash
+make deps-smx
+make build-smx
+make package-smx
+make release
+```
+
+El contenido publicado se describe en [plugin-package-map.json](C:\GitHub\VIP-Core\plugin-package-map.json) y el flujo está resumido en [docs/BUILD_SYSTEM.md](C:\GitHub\VIP-Core\docs\BUILD_SYSTEM.md).
